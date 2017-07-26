@@ -1,0 +1,55 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "quickstart/cdh"
+  config.vm.box_version = "5.10.0"
+
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 10240
+    v.cpus = 2
+  end
+
+  config.vm.network "forwarded_port", guest: 8079, host: 8079, id: "NiFi"
+  config.vm.network "forwarded_port", guest: 8400, host: 8400, id: "Kylo"
+  config.vm.network "forwarded_port", guest: 22, host: 2222, id: "ssh"
+
+  config.vm.provision "shell", inline: <<-SHELL
+    sudo useradd -r -m -s /bin/bash nifi
+    sudo useradd -r -m -s /bin/bash kylo
+    sudo useradd -r -m -s /bin/bash activemq
+
+    sudo git clone https://github.com/Teradata/kylo.git
+    cd kylo
+    mvn clean install -DskipTests
+    mv install-rpm/target/kylo-install-rpm-0.8.3-SNAPSHOT.jar ~/   
+    mv ./install-rpm/target/rpm/kylo/RPMS/noarch/kylo-*.noarch.rpm ~/kylo.rpm
+    cd ~
+
+    sudo rpm -ivh ~/kylo.rpm
+    sudo groupadd supergroup
+    sudo usermod -a -G supergroup nifi
+    sudo usermod -a -G supergroup hdfs
+    sudo usermod -a -G supergroup root
+
+    sudo mkdir -p /var/dropzone
+    sudo chmod 774 /var/dropzone/
+    sudo chown nifi:nifi /var/dropzone
+    
+    ! sudo mysql -h localhost -u root --password=cloudera -e "create database if not exists kylo character set utf8 collate utf8_general_ci;" || break;
+
+    sudo /opt/kylo/setup/elasticsearch/install-elasticsearch.sh
+    sudo service elasticsearch start
+
+    sudo /opt/kylo/setup/activemq/install-activemq.sh /opt/activemq activemq users
+
+    sudo /opt/kylo/setup/java/install-java8.sh
+
+    sudo /opt/kylo/setup/nifi/install-nifi.sh /opt/nifi nifi users
+    sudo /opt/kylo/setup/java/change-nifi-java-home.sh /opt/java/current /opt/nifi/current/
+    sudo /opt/kylo/setup/nifi/install-kylo-components.sh /opt/nifi /opt/kylo nifi users
+    
+    rm ~/kylo.rpm
+    rm -rf ~/kylo
+
+    sudo /opt/kylo/start-kylo-apps.sh
+    sudo service nifi start
+  SHELL
+end

@@ -1,0 +1,49 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "quickstart/cdh"
+  config.vm.box_version = "5.10.0"
+
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 10240
+    v.cpus = 2
+  end
+
+  config.vm.network "forwarded_port", guest: 8079, host: 8079, id: "NiFi"
+  config.vm.network "forwarded_port", guest: 8400, host: 8400, id: "Kylo"
+  config.vm.network "forwarded_port", guest: 22, host: 2222, id: "ssh"
+
+  config.vm.provision "file", source: "scripts", destination: "scripts"
+
+  config.vm.provision "shell", inline: <<-SHELL
+
+    #1 Install JCE
+    sudo wget -nv --no-check-certificate --no-cookies --header "Cookie: oraclelicense=accept-securebackup-cookie" http://download.oracle.com/otn-pub/java/jce/7/UnlimitedJCEPolicyJDK7.zip -O $JAVA_HOME/jre/lib/security/UnlimitedJCEPolicyJDK7.zip
+    cd $JAVA_HOME/jre/lib/security
+    sudo unzip UnlimitedJCEPolicyJDK7.zip
+    sudo cp UnlimitedJCEPolicy/* .
+    sudo rm -r UnlimitedJCEPolicy*
+
+    # Install kerberos & openldap
+    sudo yum install -y krb5-server krb5-libs krb5-workstation
+    sudo yum install -y openldap-clients
+
+    # Config Kerberos
+    sudo ~/scripts/configKerberos.sh /etc/krb5.conf
+    sudo ~/scripts/configKerberos.sh /var/kerberos/krb5kdc/kdc.conf
+    sudo ~/scripts/configKerberos.sh /var/kerberos/krb5kdc/kadm5.acl
+
+    # Create kerberos DB with master password = thinkbig
+    sudo kdb5_util -P thinkbig create -s
+
+    # Start kerberos server and admin
+    sudo /etc/rc.d/init.d/krb5kdc start
+    sudo /etc/rc.d/init.d/kadmin start
+    sudo chkconfig krb5kdc on
+    sudo chkconfig kadmin on
+
+    #Create admin user for Cloudera
+    sudo kadmin.local -q "addprinc -pw thinkbig admin/admin"
+
+    # Trigger Cloudera Manager -> Enable kerberos
+    TODO
+  SHELL
+end
